@@ -85,7 +85,7 @@ void primes(int lpipe[2])
             int child_status;
             wait(&child_status);
             // 关键修复：从子进程状态中提取实际退出码
-            int child_exit_code = child_status >> 8;
+            int child_exit_code = child_status & 0xff;
             exit(child_exit_code + 1); // 返回子进程数 + 自身
         }
     }
@@ -116,8 +116,8 @@ int main(int argc, char *garv[])
         close(p[WR]);
         int status;
         wait(&status);
-        int total = status >> 8;
-        printf("Total processes created: %d\n", total);
+        // int total = status & 0xff;
+        //printf("Total processes created: %d\n", total);
     }
     exit(0);
 }
