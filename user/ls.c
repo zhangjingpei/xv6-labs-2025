@@ -13,7 +13,7 @@
  * 返回值：
  *   指向静态缓冲区的指针，包含格式化后的文件名（如"stdio.h"）
  */
-char *fmtname(char *path)
+char *fmtname(char *path) /// usr/include/stdio.h → stdio.h，若长度不足14则补空格。
 {
     static char buf[DIRSIZ + 1]; // 静态缓冲区存储格式化后的文件名
     char *p;
@@ -52,7 +52,7 @@ void ls(char *path)
         return;
     }
 
-    // 获取文件状态信息
+    // 获取目标路径fd的状态信息
     if (fstat(fd, &st) < 0)
     { // 通过文件描述符获取状态
         fprintf(2, "ls: cannot stat %s\n", path);
