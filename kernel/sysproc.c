@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
 
 uint64 sys_exit(void)
 {
@@ -98,4 +99,24 @@ uint64 sys_trace(void)
         return -1;
     myproc()->syscall_trace = mask; // 为该进程的syscall_trace赋值mask
     return 0;
+}
+
+
+
+uint64 sys_info(void)
+{
+    // 从用户态传入一个指针，作为存放sysinfo结构的缓冲区
+    uint64 addr;
+    if(argaddr(0, &addr)<0)
+    {
+        return -1;
+    }
+
+    struct sysinfo sinfo;
+    sinfo.freemem = count_free_mem();
+    sinfo.nproc = count_process();
+
+    // 使用copyout，结合当前进程的页表，获得进程传进来的指针（逻辑地址）从而计算出对应的物理地址
+    
+    
 }

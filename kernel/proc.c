@@ -295,7 +295,7 @@ int fork(void) // 使子进程继承父进程的syscall_trace mask
     np->syscall_trace = p->syscall_trace;
 
     pid = np->pid;
-    
+
     np->state = RUNNABLE;
 
     release(&np->lock);
@@ -705,4 +705,16 @@ void procdump(void)
         printf("%d %s %s", p->pid, state, p->name);
         printf("\n");
     }
+}
+
+uint64 count_process(void)
+{
+    uint64 cnt = 0;
+    for (struct proc *p = proc; p < &proc[NPROC]; ++p)
+    {
+        // 不需要锁进程proc结构，因为我们只读进程，不写
+        if (p->state == UNUSED)
+            ++cnt;
+    }
+    return cnt;
 }

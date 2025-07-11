@@ -136,6 +136,7 @@ void            yield(void);                        // 让出 CPU
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len); // 拷贝到用户/内核空间
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);  // 从用户/内核空间拷贝
 void            procdump(void);                     // 打印进程信息
+uint64          count_process(void);                // 统计空闲进程数
 
 // swtch.S
 void            swtch(struct context*, struct context*); // 上下文切换
