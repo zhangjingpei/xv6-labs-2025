@@ -57,14 +57,14 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; ++i)
     {
         x_argv[i - 1] = argv[i];
-        printf("xargv[%d]=%s\n", i - 1, x_argv[i - 1]);
+        //printf("xargv[%d]=%s\n", i - 1, x_argv[i - 1]);
     }
     int base_argc = argc - 1;
 
     while (1)
     {
         int n = readline(buf, MAXSZ);
-        printf("buf=%s\n", buf);
+        //printf("buf=%s\n", buf);
         if (n == 0)
             break; // EOF
 

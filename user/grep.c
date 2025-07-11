@@ -1,4 +1,26 @@
 // Simple grep. Only supports ^ . * $ operators.
+
+/*
+示例：
+示例场景
+正则表达式："a" (匹配字母 a)
+文本："cat" (内存中实际为：'c','a','t','\0')
+
+循环执行步骤：
+第一次迭代 (text = "cat"):
+if (matchhere("a", "cat"))  // 检查"a"是否出现在"cat"开头
+matchhere 检查：'a' != 'c' → 失败
+
+text 后移：*text++ → text 现在指向 "at" (第二个字符)
+条件检查：'c' != '\0' → 继续循环
+
+第二次迭代 (text = "at"):
+if (matchhere("a", "at"))  // 检查"a"是否出现在"at"开头
+matchhere 检查：'a' == 'a' → 成功匹配!
+
+立即返回 1 (匹配成功)
+*/
+
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
@@ -22,7 +44,7 @@ void grep(char *pattern, int fd)
         // 逐行处理缓冲区内容
         while ((q = strchr(p, '\n')) != 0)
         {
-            *q = 0; // 临时替换换行为NULL（将行内容隔离为独立字符串）
+            *q = 0; // 临时替换换行\n为NULL（将行内容隔离为独立字符串）
 
             // 检查该行是否匹配模式
             if (match(pattern, p))
@@ -36,7 +58,7 @@ void grep(char *pattern, int fd)
         // 处理剩余未完成的行（跨缓冲区边界）
         if (m > 0)
         {
-            m -= p - buf;       // 计算剩余数据长度
+            m -= p - buf;       // 计算剩余数据长度 p-buf等于已经读取的数据 m是剩下的数据长度
             memmove(buf, p, m); // 将剩余数据移到缓冲区开头
         }
     }
@@ -81,7 +103,7 @@ int matchhere(char *, char *);
 int matchstar(int, char *, char *);
 
 // 主匹配函数：判断文本是否匹配正则表达式
-int match(char *re, char *text)
+int match(char *re, char *text) // match(pattern,p)  p是在一行中
 {
     if (re[0] == '^')
         return matchhere(re + 1, text); // ^ 要求从开头匹配
