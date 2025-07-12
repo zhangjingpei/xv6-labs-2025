@@ -101,13 +101,11 @@ uint64 sys_trace(void)
     return 0;
 }
 
-
-
-uint64 sys_info(void)
+uint64 sys_sysinfo(void)
 {
     // 从用户态传入一个指针，作为存放sysinfo结构的缓冲区
     uint64 addr;
-    if(argaddr(0, &addr)<0)
+    if (argaddr(0, &addr) < 0)
     {
         return -1;
     }
@@ -116,7 +114,9 @@ uint64 sys_info(void)
     sinfo.freemem = count_free_mem();
     sinfo.nproc = count_process();
 
-    // 使用copyout，结合当前进程的页表，获得进程传进来的指针（逻辑地址）从而计算出对应的物理地址
-    
-    
+    // 使用copyout，结合当前进程的页表，获得进程传进来的指针（sysinfo*）（逻辑地址）从而计算出对应的物理地址
+    // 然后将 &sinfo中的数据复制到该指针所指位置，供用户进程使用
+    if (copyout(myproc()->pagetable, addr, (char *)&sinfo, sizeof(sinfo)) < 0)
+        return -1;
+    return 0;
 }

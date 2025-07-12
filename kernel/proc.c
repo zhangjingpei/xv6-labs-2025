@@ -713,7 +713,7 @@ uint64 count_process(void)
     for (struct proc *p = proc; p < &proc[NPROC]; ++p)
     {
         // 不需要锁进程proc结构，因为我们只读进程，不写
-        if (p->state == UNUSED)
+        if (p->state != UNUSED)
             ++cnt;
     }
     return cnt;
