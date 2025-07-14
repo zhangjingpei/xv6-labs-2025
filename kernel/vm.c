@@ -1,3 +1,21 @@
+// kernel/vm.c
+//
+// 虚拟内存管理实现
+// 提供内核和用户空间的页表管理、地址映射、内存分配与释放等功能
+//
+// 主要功能包括：
+//  1. 内核页表初始化与映射
+//  2. 用户页表管理（创建、释放、复制）
+//  3. 物理内存到虚拟地址空间的映射
+//  4. 用户空间与内核空间之间的数据拷贝
+//  5. 页表遍历和操作工具函数
+//
+// 该文件是操作系统内存管理的核心组件，实现了：
+//  - 内核静态地址映射
+//  - 用户进程的地址空间管理
+//  - 物理内存的分配与回收
+//  - 页表操作基础函数
+
 #include "param.h"
 #include "types.h"
 #include "memlayout.h"
@@ -7,16 +25,20 @@
 #include "fs.h"
 
 /*
- * the kernel's page table.
+ * 内核页表（全局变量）
+ * 所有核心共享的顶级页表，用于内核空间地址映射
  */
 pagetable_t kernel_pagetable;
 
 extern char etext[]; // kernel.ld sets this to end of kernel code.
 
-extern char trampoline[]; // trampoline.S
+// 蹦床页面地址（用于特权级切换）
+extern char trampoline[];
 
 /*
- * create a direct-map page table for the kernel.
+ * 初始化内核页表
+ * 创建直接映射（恒等映射）的内核页表
+ * 映射范围包括：外设寄存器、内核代码/数据区、物理内存和蹦床页面
  */
 void kvminit()
 {
