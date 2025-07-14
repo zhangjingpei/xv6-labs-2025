@@ -379,24 +379,25 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 // Return 0 on success, -1 on error.
 int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-    uint64 n, va0, pa0;
+    // uint64 n, va0, pa0;
 
-    while (len > 0)
-    {
-        va0 = PGROUNDDOWN(srcva);
-        pa0 = walkaddr(pagetable, va0);
-        if (pa0 == 0)
-            return -1;
-        n = PGSIZE - (srcva - va0);
-        if (n > len)
-            n = len;
-        memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+    // while (len > 0)
+    // {
+    //     va0 = PGROUNDDOWN(srcva);
+    //     pa0 = walkaddr(pagetable, va0);
+    //     if (pa0 == 0)
+    //         return -1;
+    //     n = PGSIZE - (srcva - va0);
+    //     if (n > len)
+    //         n = len;
+    //     memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-        len -= n;
-        dst += n;
-        srcva = va0 + PGSIZE;
-    }
-    return 0;
+    //     len -= n;
+    //     dst += n;
+    //     srcva = va0 + PGSIZE;
+    // }
+    // return 0;
+    return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -405,48 +406,49 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 // Return 0 on success, -1 on error.
 int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-    uint64 n, va0, pa0;
-    int got_null = 0;
+    // uint64 n, va0, pa0;
+    // int got_null = 0;
 
-    while (got_null == 0 && max > 0)
-    {
-        va0 = PGROUNDDOWN(srcva);
-        pa0 = walkaddr(pagetable, va0);
-        if (pa0 == 0)
-            return -1;
-        n = PGSIZE - (srcva - va0);
-        if (n > max)
-            n = max;
+    // while (got_null == 0 && max > 0)
+    // {
+    //     va0 = PGROUNDDOWN(srcva);
+    //     pa0 = walkaddr(pagetable, va0);
+    //     if (pa0 == 0)
+    //         return -1;
+    //     n = PGSIZE - (srcva - va0);
+    //     if (n > max)
+    //         n = max;
 
-        char *p = (char *)(pa0 + (srcva - va0));
-        while (n > 0)
-        {
-            if (*p == '\0')
-            {
-                *dst = '\0';
-                got_null = 1;
-                break;
-            }
-            else
-            {
-                *dst = *p;
-            }
-            --n;
-            --max;
-            p++;
-            dst++;
-        }
+    //     char *p = (char *)(pa0 + (srcva - va0));
+    //     while (n > 0)
+    //     {
+    //         if (*p == '\0')
+    //         {
+    //             *dst = '\0';
+    //             got_null = 1;
+    //             break;
+    //         }
+    //         else
+    //         {
+    //             *dst = *p;
+    //         }
+    //         --n;
+    //         --max;
+    //         p++;
+    //         dst++;
+    //     }
 
-        srcva = va0 + PGSIZE;
-    }
-    if (got_null)
-    {
-        return 0;
-    }
-    else
-    {
-        return -1;
-    }
+    //     srcva = va0 + PGSIZE;
+    // }
+    // if (got_null)
+    // {
+    //     return 0;
+    // }
+    // else
+    // {
+    //     return -1;
+    // }
+    return copyinstr_new(pagetable, dst, srcva, max);
 }
 void vmprint_recursive(pagetable_t pagetable, int level)
 {
@@ -501,7 +503,8 @@ void vminit(pagetable_t pagetable)
     vmmap(pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
     // CLINT
-    vmmap(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+    if(pagetable == kernel_pagetable)
+        vmmap(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
     // PLIC
     vmmap(pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -565,4 +568,34 @@ void freeukpgtbl(pagetable_t pagetable)
     }
     // level-2 page table
     kfree(pagetable); // 释放 l2 顶级页表
+}
+
+int u2kvmcopy(pagetable_t upgtbl, pagetable_t kpgtbl, uint64 begin, uint64 end)
+{
+    pte_t *pte; // 指向页表条目
+    uint64 pa, i;
+    uint flags;
+    for (i = begin; i < end; i += PGSIZE)
+    {
+        if ((pte = walk(upgtbl, i, 0)) == 0)
+        {
+            panic("uvmmap_copy: pte should exist");
+        }
+        if ((*pte & PTE_V) == 0)
+        {
+            panic("uvmmap_copy: page not present");
+        }
+
+        pa = PTE2PA(*pte); // 将页表条目转换为物理地址 *pte是用户空间页表中的内容
+
+        // 映射的时候需要去除页表项中的PTE_U标志
+        flags = PTE_FLAGS(*pte) & (~PTE_U);
+        // 用户内核空间与用户空间页表映射相同的内容
+        if (mappages(kpgtbl, i, PGSIZE, pa, flags) != 0)
+        {
+            uvmunmap(kpgtbl, 0, i / PGSIZE, 0);
+            return -1;
+        }
+    }
+    return 0;
 }

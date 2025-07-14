@@ -257,6 +257,13 @@ void userinit(void)
     uvminit(p->pagetable, initcode, sizeof(initcode));
     p->sz = PGSIZE;
 
+    // 首个用户进程，将用户空间页表映射到内核页表
+    if(u2kvmcopy(p->pagetable,  p->kpgtbl, 0, PGSIZE)<0)
+    {
+        panic("userinit: u2kvcopy");
+    }
+
+
     // prepare for the very first "return" from kernel to user.
     p->trapframe->epc = 0;     // user program counter
     p->trapframe->sp = PGSIZE; // user stack pointer
@@ -271,22 +278,35 @@ void userinit(void)
 
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
+// 用户空间可用内存扩容或者缩容时也需要将用户空间页表和用户内核页表进行同步
 int growproc(int n)
 {
     uint sz;
-    struct proc *p = myproc();
+    struct proc *p = myproc(); // 获取进程
 
-    sz = p->sz;
+    sz = p->sz; // 获取进程大小
+
+    // 检查是否会超过PLIC的地址
+    if (n > 0 && sz + n >= PLIC)
+    {
+        return -1;
+    }
+    uint oldsz = sz;
+
     if (n > 0)
     {
         if ((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0)
         {
             return -1;
         }
+        // n>0 申请增加内存，我们在这里等待扩容完成后，把新增的内容映射到用户内核页表
+        u2kvmcopy(p->pagetable, p->kpgtbl, PGROUNDUP(oldsz), sz);
     }
     else if (n < 0)
     {
         sz = uvmdealloc(p->pagetable, sz, sz + n);
+        // 同上，释放内存以后同步映射-- 即删除页表条目
+        uvmunmap(p->kpgtbl, PGROUNDUP(sz), (PGROUNDUP(oldsz) - PGROUNDUP(sz)) / PGSIZE, 0);
     }
     p->sz = sz;
     return 0;
@@ -314,6 +334,15 @@ int fork(void)
         return -1;
     }
     np->sz = p->sz;
+
+    // uvmcopy() 已经将父进程的页表和物理内存都复制到了新的子进程中
+    // 这里需要把新的子进程的用户空间页表，复制到子进程的 用户的内核页表
+    if ((u2kvmcopy(np->pagetable, np->kpgtbl, 0, np->sz)) < 0)
+    {
+        freeproc(np);
+        release(&np->lock);
+        return -1;
+    }
 
     np->parent = p;
 

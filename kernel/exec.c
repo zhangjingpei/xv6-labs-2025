@@ -110,6 +110,14 @@ int exec(char *path, char **argv)
             last = s + 1;
     safestrcpy(p->name, last, sizeof(p->name));
 
+    // 先取消旧的内核页表的映射内容
+    uvmunmap(p->kpgtbl, 0, PGROUNDUP(oldsz) / PGSIZE, 0);
+    // 将新的用户空间的页表拷贝到内核页表中
+    if ((u2kvmcopy(pagetable, p->kpgtbl, 0, sz)) < 0)
+    {
+        goto bad;
+    }
+
     // Commit to the user image.
     oldpagetable = p->pagetable;
     p->pagetable = pagetable;

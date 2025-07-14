@@ -186,6 +186,8 @@ int             vmmap(pagetable_t, uint64, uint64, uint64, int); // 虚拟和物
 pagetable_t     createukpgtbl(); // 新增函数，全称 create user kernel page table，创建用户进程的内核页表
 void            freeukpgtbl(pagetable_t); // 新增函数，用来释放用户内核页表
 
+int             u2kvmcopy(pagetable_t, pagetable_t, uint64, uint64);// 新增函数，用于将用户空间的页表内容复制到用户内核页表
+
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
@@ -197,8 +199,14 @@ void            virtio_disk_init(void);
 void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
 
+// vmcopyin.c
+int             copyin_new(pagetable_t, char *, uint64, uint64); 
+int             copyinstr_new(pagetable_t, char*, uint64, uint64);
+
+
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
 
 
 
