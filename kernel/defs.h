@@ -160,7 +160,7 @@ int             uartgetc(void);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
-uint64          kvmpa(uint64);
+uint64          kvmpa(pagetable_t, uint64);// 原有基础上增加了页表入参
 void            kvmmap(uint64, uint64, uint64, int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);
@@ -179,6 +179,13 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t); // 新增
+
+void            vminit(pagetable_t); // 把原先 kvminit() 初始化内容搬过来，并增加页表作为入参，可以为任一页表映射原内核映射的内容
+int             vmmap(pagetable_t, uint64, uint64, uint64, int); // 虚拟和物理内存映射，参考 kvmmap() ，入参增加了根页表
+
+pagetable_t     createukpgtbl(); // 新增函数，全称 create user kernel page table，创建用户进程的内核页表
+void            freeukpgtbl(pagetable_t); // 新增函数，用来释放用户内核页表
+
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

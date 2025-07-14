@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+extern pagetable_t kernel_pagetable;
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -34,12 +35,13 @@ void procinit(void)
         // Allocate a page for the process's kernel stack.
         // Map it high in memory, followed by an invalid
         // guard page.
-        char *pa = kalloc();
-        if (pa == 0)
-            panic("kalloc");
-        uint64 va = KSTACK((int)(p - proc));
-        kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-        p->kstack = va;
+        // procinit() 函数为每个进程都预先分配了 一页 的 栈空间，页表使用的是全局变量 kernel_pagetable
+        // char *pa = kalloc();
+        // if (pa == 0)
+        //     panic("kalloc");
+        // uint64 va = KSTACK((int)(p - proc));
+        // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+        // p->kstack = va;
     }
     kvminithart();
 }
@@ -125,6 +127,34 @@ found:
         return 0;
     }
 
+    // 下面的新增代码，涉及到申请内存的，都可能会遇到失败的情况，所以每一步都需要处理释放
+
+    // 为进程分配内核页表，如果创建失败，记得执行释放
+    if ((p->kpgtbl = createukpgtbl()) == 0)
+    {
+        freeproc(p);
+        release(&p->lock);
+        return 0;
+    }
+
+    // 申请一页内核栈，简单来说，就是把 procinit() 删除的代码移到这儿
+    char *pa = kalloc();
+    if (pa == 0)
+    {
+        freeproc(p);
+        release(&p->lock);
+        return 0;
+    }
+    uint64 va = KSTACK((int)0); // 分配一个唯一的内核栈的虚拟地址
+    if (vmmap(p->kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W) != 0)
+    { // 映射内核栈到用户内核页表
+        kfree((void *)pa);
+        freeproc(p);
+        release(&p->lock);
+        return 0;
+    }
+    p->kstack = va; // 记录内核栈的虚拟地址
+
     // Set up new context to start executing at forkret,
     // which returns to user space.
     memset(&p->context, 0, sizeof(p->context));
@@ -144,6 +174,17 @@ static void freeproc(struct proc *p)
     p->trapframe = 0;
     if (p->pagetable)
         proc_freepagetable(p->pagetable, p->sz);
+
+    // 找到内核栈(一页)的物理地址，释放内存
+    void *kstack_pa = (void *)kvmpa(p->kpgtbl, p->kstack);
+    kfree(kstack_pa);
+    p->kstack = 0;
+
+    // 调用 freeukpgtbl() 释放掉进程的内核页表
+    if (p->kpgtbl)
+        freeukpgtbl(p->kpgtbl);
+    p->kpgtbl = 0;
+
     p->pagetable = 0;
     p->sz = 0;
     p->pid = 0;
@@ -458,6 +499,8 @@ int wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// 在 scheduler() 函数中，当切换到一个进程时，加载该进程的 用户内核页表
+// 当切换回调度器时，恢复全局 内核页表
 void scheduler(void)
 {
     struct proc *p;
@@ -480,7 +523,16 @@ void scheduler(void)
                 // before jumping back to us.
                 p->state = RUNNING;
                 c->proc = p;
+
+                // 切换到进程的内核页表
+                w_satp(MAKE_SATP(p->kpgtbl));
+                sfence_vma();
+
                 swtch(&c->context, &p->context);
+
+                // 切换回全局内核页表
+                w_satp(MAKE_SATP(kernel_pagetable));
+                sfence_vma();
 
                 // Process is done running for now.
                 // It should have changed its p->state before coming back.

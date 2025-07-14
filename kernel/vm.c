@@ -21,29 +21,7 @@ extern char trampoline[]; // trampoline.S
 void kvminit()
 {
     kernel_pagetable = (pagetable_t)kalloc();
-    memset(kernel_pagetable, 0, PGSIZE);
-
-    // uart registers
-    kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
-
-    // virtio mmio disk interface
-    kvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-    // CLINT
-    kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
-
-    // PLIC
-    kvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W);
-
-    // map kernel text executable and read-only.
-    kvmmap(KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
-
-    // map kernel data and the physical RAM we'll make use of.
-    kvmmap((uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
-
-    // map the trampoline for trap entry/exit to
-    // the highest virtual address in the kernel.
-    kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+    vminit(kernel_pagetable);
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -124,13 +102,13 @@ void kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 // a physical address. only needed for
 // addresses on the stack.
 // assumes va is page aligned.
-uint64 kvmpa(uint64 va)
+uint64 kvmpa(pagetable_t pagetable, uint64 va)
 {
     uint64 off = va % PGSIZE;
     pte_t *pte;
     uint64 pa;
 
-    pte = walk(kernel_pagetable, va, 0);
+    pte = walk(pagetable, va, 0);
     if (pte == 0)
         panic("kvmpa");
     if ((*pte & PTE_V) == 0)
@@ -488,4 +466,81 @@ void vmprint(pagetable_t pagetable)
 {
     printf("page table %p\n", pagetable);
     vmprint_recursive(pagetable, 1);
+}
+
+void vminit(pagetable_t pagetable)
+{
+    memset(pagetable, 0, PGSIZE);
+
+    // uart registers
+    vmmap(pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+    // virtio mmio disk interface
+    vmmap(pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+    // CLINT
+    vmmap(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+    // PLIC
+    vmmap(pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+    // map kernel text executable and read-only.
+    vmmap(pagetable, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
+
+    // map kernel data and the physical RAM we'll make use of.
+    vmmap(pagetable, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
+
+    // map the trampoline for trap entry/exit to
+    // the highest virtual address in the kernel.
+    vmmap(pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+}
+
+// 新增函数
+int vmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+    if (mappages(pagetable, va, sz, pa, perm) != 0)
+    {
+        if (pagetable == kernel_pagetable)
+        {
+            panic("vmmap");
+        }
+        return -1;
+    }
+    return 0;
+}
+
+// 创建一个用户进程的内核页表并完成初始化工作
+pagetable_t createukpgtbl()
+{
+    pagetable_t ukpgtbl = (pagetable_t)kalloc();
+    vminit(ukpgtbl);
+    return ukpgtbl;
+}
+
+// 释放三级页表占用的内存，共 3*4kb
+void freeukpgtbl(pagetable_t pagetable)
+{
+    // 只释放页表占用内存，但不释放页表项里面的物理内存（因为是共享的）
+    for (int i = 0; i < 512; i++)
+    {
+        // level-1 page table entry
+        pte_t l1pte = pagetable[i];
+        if ((l1pte & PTE_V) && (l1pte & (PTE_R | PTE_W | PTE_X)) == 0)
+        {
+            uint64 l1ptepa = PTE2PA(l1pte);
+            // 释放最后一级页表
+            for (int j = 0; j < 512; j++)
+            {
+                // level-0 page table entry
+                pte_t l0pte = ((pagetable_t)l1ptepa)[j];
+                if ((l0pte & PTE_V) && (l0pte & (PTE_R | PTE_W | PTE_X)) == 0)
+                {
+                    kfree((void *)PTE2PA(l0pte)); // 释放 l0 页表
+                }
+            }
+            kfree((void *)l1ptepa); // 释放 l1 页表
+        }
+    }
+    // level-2 page table
+    kfree(pagetable); // 释放 l2 顶级页表
 }
