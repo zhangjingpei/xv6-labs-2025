@@ -65,17 +65,25 @@ uservec:
         sd t0, 112(a0)
 
         # restore kernel stack pointer from p->trapframe->kernel_sp
+        # 从trapframe读取内核栈指针
         ld sp, 8(a0)
 
         # make tp hold the current hartid, from p->trapframe->kernel_hartid
+        # 内核线程id
         ld tp, 32(a0)
 
         # load the address of usertrap(), p->trapframe->kernel_trap
+        # t0寄存器保存usertrap函数地址
         ld t0, 16(a0)
 
         # restore kernel page table from p->trapframe->kernel_satp
+        # t1寄存器保存内核页表地址
         ld t1, 0(a0)
+
+        # 设置satp为内核页表
         csrw satp, t1
+
+        # 刷新TLB
         sfence.vma zero, zero
 
         # a0 is no longer valid, since the kernel page
