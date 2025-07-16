@@ -89,7 +89,37 @@ void usertrap(void)
     // 若 trap 是定时器中断（which_dev == 2），
     // 则调用yield()主动让出 CPU，触发进程调度：
     if (which_dev == 2)
+    {
+        struct proc *p = myproc();
+        // 如果设置了定时器
+        if (p->alarm_interval > 0)
+        {
+            p->ticks_count++;
+            printf("p->ticks_count=%d\n", p->ticks_count);
+            // 是否达到触发条件：计数达到了设定的间隔 + 处理函数当前未在执行
+            // 如累计 2 次定时器中断alarm_interval
+            if (p->ticks_count >= p->alarm_interval && !p->alarm_on)
+            {
+                p->ticks_count = 0;
+                p->alarm_on = 1;
+
+                // 首次调用handler需要分配保存上下文的空间
+                if (p->alarm_trapframe == 0)
+                {
+                    p->alarm_trapframe = kalloc();
+                }
+
+                // 保存上下文
+                *p->alarm_trapframe = *p->trapframe;
+
+                // 修改程序计数器指向处理函数
+                //  当中断返回时回调到handler函数执行
+                p->trapframe->epc = (uint64)p->alarm_handler;
+            }
+        }
+
         yield();
+    }
 
     // 所有处理完成后，调用usertrapret()完成从内核到用户空间的切换。
     usertrapret();

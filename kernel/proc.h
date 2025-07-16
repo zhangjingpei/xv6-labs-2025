@@ -48,10 +48,10 @@ struct trapframe
     /*   0 */ uint64 kernel_satp; // kernel page table  存储内核页表的地址
     /*   8 */ uint64 kernel_sp;   // top of process's kernel stack 指向进程内核栈的顶部
     /*  16 */ uint64 kernel_trap; // usertrap()  存储陷阱处理函数（如 usertrap()）的地址
-    /*  24 */ uint64 epc;           // saved user program counter  用户程序的程序计数器（PC）陷阱发生时用户程序正在执行的指令地址
+    /*  24 */ uint64 epc; // saved user program counter  用户程序的程序计数器（PC）陷阱发生时用户程序正在执行的指令地址
     /*  32 */ uint64 kernel_hartid; // saved kernel tp  保存内核线程 ID
-    /*  40 */ uint64 ra;            //返回地址
-    /*  48 */ uint64 sp;    //sp（栈指针）
+    /*  40 */ uint64 ra;            // 返回地址
+    /*  48 */ uint64 sp;            // sp（栈指针）
     /*  56 */ uint64 gp;
     /*  64 */ uint64 tp;
 
@@ -84,7 +84,6 @@ struct trapframe
     /* 232 */ uint64 s9;
     /* 240 */ uint64 s10;
     /* 248 */ uint64 s11;
-
 
     /* 256 */ uint64 t3;
     /* 264 */ uint64 t4;
@@ -123,4 +122,10 @@ struct proc
     struct file *ofile[NOFILE];  // Open files
     struct inode *cwd;           // Current directory
     char name[16];               // Process name (debugging)
+
+    int alarm_interval;                // 记录定时器触发间隔（以时钟周期为单位）
+    void (*alarm_handler)();           // 定时器处理函数的函数指针
+    int ticks_count;                   // 当前已经过的时钟周期计数器
+    struct trapframe *alarm_trapframe; // 用于保存中断前进程的上下文信息
+    int alarm_on;                      // 定时器是否已经在运行了
 };

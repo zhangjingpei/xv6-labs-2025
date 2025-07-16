@@ -57,7 +57,7 @@ uint64 sys_sleep(void)
     if (argint(0, &n) < 0)
         return -1;
     acquire(&tickslock);
-    ticks0 = ticks; 
+    ticks0 = ticks;
     while (ticks - ticks0 < n)
     {
         if (myproc()->killed)
@@ -90,4 +90,31 @@ uint64 sys_uptime(void)
     xticks = ticks;
     release(&tickslock);
     return xticks;
+}
+
+uint64 sys_sigalarm(void)
+{
+    int interval;   // 定时器的间隔
+    uint64 handler; // 处理函数的地址
+    if (argint(0, &interval) < 0)
+        return -1;
+    if (argaddr(1, &handler) < 0)
+        return -1;
+
+    struct proc *p = myproc();
+
+    // 初始化定时器
+    p->alarm_interval = interval;
+    p->alarm_handler = (void (*)())handler; //(void(*)())handler;这么写什么意思
+    p->ticks_count = 0;
+    p->alarm_on = 0;
+    return 0;
+}
+
+uint64 sys_sigreturn(void)
+{
+    struct proc *p = myproc();
+    *p->trapframe = *p->alarm_trapframe; // 恢复保存的上下文
+    p->alarm_on = 0;                     // 清除执行标志，允许下一次定时器触发
+    return 0;
 }

@@ -73,7 +73,7 @@ uservec:
         ld tp, 32(a0)
 
         # load the address of usertrap(), p->trapframe->kernel_trap
-        # t0寄存器保存usertrap函数地址
+        # t0寄存器保存usertrap函数的地址
         ld t0, 16(a0)
 
         # restore kernel page table from p->trapframe->kernel_satp
@@ -106,11 +106,15 @@ userret:
 
         # put the saved user a0 in sscratch, so we
         # can swap it with our a0 (TRAPFRAME) in the last step.
-        ld t0, 112(a0)
-        csrw sscratch, t0
+        # 是的，系统调用的返回值覆盖了我们保存在trapframe中的a0寄存器的值（详见6.6）。
+        # 我们希望用户程序Shell在a0寄存器中看到系统调用的返回值。
+        # 所以，trapframe中的a0寄存器现在是系统调用的返回值2
+        ld t0, 112(a0)  # a0为寄存器，其中存放着trapframe a0->a0存放着系统调用的返回值
+        csrw sscratch, t0 # 
 
         # restore all but a0 from TRAPFRAME
-        ld ra, 40(a0)
+        # 恢复现场
+        ld ra, 40(a0)  
         ld sp, 48(a0)
         ld gp, 56(a0)
         ld tp, 64(a0)
