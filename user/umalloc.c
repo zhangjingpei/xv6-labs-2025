@@ -54,12 +54,18 @@ static Header *morecore(uint nu)
 
     if (nu < 4096)
         nu = 4096;
+    //printf("morecore\n");
     p = sbrk(nu * sizeof(Header)); // sbrk
+    //printf("motecore:p:%p\n  ",p);
     if (p == (char *)-1)
         return 0;
+    
     hp = (Header *)p;
+    //printf("morecore\n");
     hp->s.size = nu;
+    //printf("morecore\n");
     free((void *)(hp + 1));
+    
     return freep;
 }
 

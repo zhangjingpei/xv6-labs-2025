@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h" // 需要用到proc结构体
 /*
  * the kernel's page table.
  */
@@ -100,7 +101,16 @@ uint64 walkaddr(pagetable_t pagetable, uint64 va)
     if (va >= MAXVA)
         return 0;
 
+    struct proc *p = myproc(); // 呐，新增的
     pte = walk(pagetable, va, 0);
+    // 如果页表项不存在或者页表项不是有效的，尝试分配物理内存
+    if (pte == 0 || (*pte & PTE_V) == 0)
+    {
+        if (va >= p->sz || va < p->trapframe->sp || uvmalloc(pagetable, PGROUNDDOWN(va), PGROUNDDOWN(va) + PGSIZE) == 0)
+            // 内存地址不合法，或者内存不足分配失败
+            return 0;
+    }
+
     if (pte == 0)
         return 0;
     if ((*pte & PTE_V) == 0)
@@ -156,7 +166,7 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
             return -1;
         if (*pte & PTE_V)
             panic("remap");
-        *pte = PA2PTE(pa) | perm | PTE_V;
+        *pte = PA2PTE(pa) | perm | PTE_V; // 建立映射的关键步骤
         if (a == last)
             break;
         a += PGSIZE;
@@ -179,9 +189,14 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     for (a = va; a < va + npages * PGSIZE; a += PGSIZE)
     {
         if ((pte = walk(pagetable, a, 0)) == 0)
-            panic("uvmunmap: walk");
+            // panic("uvmunmap: walk");   //调用 uvmunmap() 解除页表映射时，因为前面是 假分配，所以这里会存在根据
+            // 虚拟地址找不到实际物理页面 的情况
+            continue; //
         if ((*pte & PTE_V) == 0)
-            panic("uvmunmap: not mapped");
+            // 忽略报错
+            //  panic("uvmunmap: not mapped");    //调用 uvmunmap() 解除页表映射时，因为前面是
+            //  假分配，所以这里会存在根据 虚拟地址找不到实际物理页面 的情况
+            continue;
         if (PTE_FLAGS(*pte) == PTE_V)
             panic("uvmunmap: not a leaf");
         if (do_free)
@@ -240,6 +255,7 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
             return 0;
         }
         memset(mem, 0, PGSIZE);
+        // 将新分配的物理页映射到页表上
         if (mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W | PTE_X | PTE_R | PTE_U) != 0)
         {
             kfree(mem);
@@ -285,6 +301,7 @@ void freewalk(pagetable_t pagetable)
         }
         else if (pte & PTE_V)
         {
+            // 这说明在释放页表时，还有一些物理页面的映射没有被正确清除。
             panic("freewalk: leaf");
         }
     }
@@ -316,9 +333,11 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     for (i = 0; i < sz; i += PGSIZE)
     {
         if ((pte = walk(old, i, 0)) == 0)
-            panic("uvmcopy: pte should exist");
+            // panic("uvmcopy: pte should exist");
+            continue;
         if ((*pte & PTE_V) == 0)
-            panic("uvmcopy: page not present");
+            // panic("uvmcopy: page not present");
+            continue;
         pa = PTE2PA(*pte);
         flags = PTE_FLAGS(*pte);
         if ((mem = kalloc()) == 0)

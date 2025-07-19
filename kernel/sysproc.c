@@ -43,21 +43,26 @@ uint64 sys_sbrk(void)
         return -1;
 
     struct proc *p = myproc();
-    addr = p->sz;
 
+    addr = p->sz;
+    //printf("sys_sbrk:addr:%d\n", addr);
     // 源代码调用了growproc执行扩容或者缩容
     // if (growproc(n) < 0)
     //     return -1;
 
     // 改为Eliminate allocation
     if (n > 0)
+    {
         (p->sz) += n; // 仅仅增大sz，但是不分配物理页
+        //printf("sys_sbrk:p->sz:%d\n", p->sz);
+    }
     else
     {
         uint sz = p->sz;
         p->sz = uvmdealloc(p->pagetable, sz, sz + n);
     }
 
+    //printf("sys_sbrk:addr:%d\n", addr);
     return addr;
 }
 

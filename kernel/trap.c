@@ -68,6 +68,18 @@ void usertrap(void)
     {
         // ok
     }
+    // 发生缺页故障
+    else if (r_scause() == 13 || r_scause() == 15)
+    {
+        uint64 va = r_stval(); // r_stval() 返回 RISC-V stval
+                               // 寄存器，该寄存器的值表示出错的虚拟地址---代表由该虚拟地址得出的物理页未分配。
+        if (va >= p->sz || va < p->trapframe->sp ||
+            (uvmalloc(p->pagetable, PGROUNDDOWN(va), PGROUNDDOWN(va) + PGSIZE) == 0))
+        {
+            p->killed = 1;
+        }
+       
+    }
     else
     {
         printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

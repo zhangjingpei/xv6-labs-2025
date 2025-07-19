@@ -208,9 +208,11 @@ int fork1(void)
 struct cmd *execcmd(void)
 {
     struct execcmd *cmd;
-
-    cmd = malloc(sizeof(*cmd));  // 在此处发生sbrk
+    //printf("execcmd\n");
+    cmd = malloc(sizeof(*cmd));  // 在此处发生sbrk  并发生缺页故障
+    //printf("execcmd\n");
     memset(cmd, 0, sizeof(*cmd));
+    
     cmd->type = EXEC;
     return (struct cmd *)cmd;
 }
@@ -358,9 +360,9 @@ struct cmd *parseline(char **ps, char *es)
     
     struct cmd *cmd;
 
-    printf("parseline\n");
+    //printf("parseline\n");
     cmd = parsepipe(ps, es);//在此处发生sys_sbrk
-    printf("parseline\n");
+    //printf("parseline\n");
     while (peek(ps, es, "&"))
     {
         gettoken(ps, es, 0, 0);
