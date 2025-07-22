@@ -27,122 +27,196 @@
     ((NBUF + NBUCKET - 1) /                                                                                            \
      NBUCKET) // 每个桶的buf数量，NBUF默认为30，这里向上取整后结果应该是 3，即每个桶里面有 3 个 buf
 
+// 全局缓冲区数组
+struct buf buffers[NBUF];
+
 // 缓冲区缓存全局管理结构
 struct
 {
-    struct spinlock lock;    // 自旋锁，保护整个bcache结构
-    struct buf buf[NBUFFER]; // 静态分配的缓冲区数组（NBUF为缓冲区总数）->NBUFFER
+    struct spinlock lock; // 自旋锁，保护整个bcache结构
 
     // Linked list of all buffers, through prev/next.
     // Sorted by how recently the buffer was used.
     // head.next is most recent, head.prev is least.
     // 双向循环链表，按LRU（最近最少使用）顺序管理所有缓冲区：
     // head.next指向最近使用的缓冲区，head.prev指向最久未使用的缓冲区
-    // struct buf head; // 废弃
-} bcache[NBUCKET]; // 哈希桶数组，一共13个桶， 每个桶里面有三个buf数组
 
-static uint global_timestamp = 0;
+    struct buf *head; // 桶内链表头指针
+} bcache[NBUCKET];    // 哈希桶数组，一共13个桶， 每个桶里面有三个buf数组
+
+// 修改：使用64位时间戳
+static uint64_t global_timestamp;
+
+// 移动缓冲区（确保调用时不持有任何桶锁）
+void move_buf(struct buf *b, uint new_bucket)
+{
+    uint old_bucket = b->home_bucket; // 缓冲区原先所属哈希桶
+    if (old_bucket == new_bucket)
+        return;
+    // 按顺序加锁避免死锁
+    if (old_bucket < new_bucket)
+    {
+        acquire(&bcache[old_bucket].lock);
+        acquire(&bcache[new_bucket].lock);
+    }
+    else if (old_bucket > new_bucket)
+    {
+        acquire(&bcache[new_bucket].lock);
+        acquire(&bcache[old_bucket].lock);
+    }
+
+    // 从原桶链表溢出
+    if (b->prev)
+        b->prev->next = b->next;
+    if (b->next)
+        b->next->prev = b->prev;
+    if (b == bcache[old_bucket].head)
+        bcache[old_bucket].head = b->next;
+
+    // 添加到新桶链表头部
+    b->next = bcache[new_bucket].head;
+    b->prev = 0;
+    if (bcache[new_bucket].head)
+    {
+        bcache[new_bucket].head->prev = b;
+    }
+    bcache[new_bucket].head = b;
+
+    b->home_bucket = new_bucket;
+
+    // 释放锁（按相反顺序）
+    if (old_bucket < new_bucket)
+    {
+        release(&bcache[new_bucket].lock);
+        release(&bcache[old_bucket].lock);
+    }
+    else
+    {
+        release(&bcache[old_bucket].lock);
+        release(&bcache[new_bucket].lock);
+    }
+}
 
 // 初始化缓冲区缓存系统
 void binit(void)
 {
 
-    // 初始化bcache的自旋锁
+    // 初始化桶锁和链表
     for (int i = 0; i < NBUCKET; i++)
     {
         initlock(&bcache[i].lock, "bcache");
-
-        for (int j = 0; j < NBUFFER; j++)
-        {
-            bcache[i].buf[j].timestamp = 0; // 初始化时间戳为0
-            initsleeplock(&bcache[i].buf[j].lock, "buffer");
-        }
+        bcache[i].head = 0;
     }
 
+    /// 初始化缓冲区并分配到桶
+    for (int i = 0; i < NBUF; i++)
+    {
+        struct buf *b = &buffers[i];
+        b->refcnt = 0;
+        b->home_bucket = i % NBUCKET; // 均匀分配
+        b->prev = b->next = 0;
+        initsleeplock(&b->lock, "buffer");
 
+        uint bucket = b->home_bucket;
+        acquire(&bcache[bucket].lock);
+        b->next = bcache[bucket].head;
+        if (bcache[bucket].head)
+            bcache[bucket].head->prev = b;
+        bcache[bucket].head = b;
+        release(&bcache[bucket].lock);
+    }
 }
-
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
 // 获取指定设备的磁盘块对应的缓冲区（如果不存在则分配）
 static struct buf *bget(uint dev, uint blockno)
 {
+    uint target_bucket = hash(blockno);
     struct buf *b;
 
-    uint bucket_id = hash(blockno);
-
-    // 优先在当前哈希桶中，查找已经缓存的快
-    acquire(&bcache[bucket_id].lock);
-    for (int i = 0; i < NBUFFER; i++)
+    // 阶段1：目标桶内查找
+    acquire(&bcache[target_bucket].lock);
+    for (b = bcache[target_bucket].head; b; b = b->next)
     {
-        b = &bcache[bucket_id].buf[i];
         if (b->dev == dev && b->blockno == blockno)
         {
             b->refcnt++;
-
-            // 增加引用的同时，更新时间戳
             update_timestamp(b);
-            release(&bcache[bucket_id].lock);
-            acquiresleep(&b->lock); // 获取缓冲区的睡眠锁
+            release(&bcache[target_bucket].lock);
+            acquiresleep(&b->lock);
             return b;
         }
     }
 
-    // 未找到缓存快，根据时间戳寻找最久未使用的缓冲区,即timestamp最小
-    release(&bcache[bucket_id].lock); // 先释放哈希桶的锁
-    uint min_timestamp = 0xffffffff;
-    struct buf *least_used_buf = 0;
-    int least_used_bucket_id = -1;
+    // 阶段2：目标桶内找空闲缓冲区
+    struct buf *candidate = 0;
+    uint64 min_ts = UINT64_MAX;
 
-    // 环形遍历所有桶，找出其他桶中未使用的空闲块
-    // 遍历所有桶的过程中，记录最少使用并且最久未使用的块
-    // 如果没有空闲块，那么直接使用最少使用且最久未使用的快
-    for (int i = 0, cur_bucket_id = bucket_id; i < NBUCKET; i++, cur_bucket_id++)
+    for (b = bcache[target_bucket].head; b; b = b->next)
     {
-        if (cur_bucket_id == NBUCKET)
-            cur_bucket_id = 0;
-        acquire(&bcache[cur_bucket_id].lock);
-        for (int j = 0; j < NBUFFER; j++)
+        if (b->refcnt == 0)
         {
-            b = &bcache[cur_bucket_id].buf[j];
-            if (b->refcnt == 0) // 找到未使用的快
+            if (!candidate || b->timestamp < min_ts)
             {
-                b->dev = dev;
-                b->blockno = blockno;
-                b->valid = 0;
-                b->refcnt = 1;
-                update_timestamp(b);
-                release(&bcache[cur_bucket_id].lock);
-                acquiresleep(&b->lock);
-                return b;
-            }
-            // 更新 最久未使用的块
-            if (b->timestamp < min_timestamp)
-            {
-                min_timestamp = b->timestamp; // 找到timestamp最小的buffer
-                least_used_buf = b;
-                least_used_bucket_id = cur_bucket_id;
+                candidate = b;
+                min_ts = b->timestamp;
             }
         }
-        release(&bcache[cur_bucket_id].lock);
     }
 
-    // 其他桶里也没有空闲块，那么只能使用最久未使用的buffer
-    if (least_used_buf && least_used_bucket_id >= 0)
+    if (candidate)
     {
-        acquire(&bcache[least_used_bucket_id].lock);
-        // 一大堆赋值和初始化操作
-        least_used_buf->dev = dev;
-        least_used_buf->blockno = blockno;
-        least_used_buf->valid = 0;
-        least_used_buf->refcnt = 1;
-        update_timestamp(least_used_buf);
-        release(&bcache[least_used_bucket_id].lock);
-        acquiresleep(&least_used_buf->lock);
-        return least_used_buf;
+        candidate->dev = dev;
+        candidate->blockno = blockno;
+        candidate->valid = 0;
+        candidate->refcnt = 1;
+        update_timestamp(candidate);
+        release(&bcache[target_bucket].lock);
+        acquiresleep(&candidate->lock);
+        return candidate;
     }
-    panic("bget: no buffers");
+    release(&bcache[target_bucket].lock);
+
+    // 阶段3：全局搜索空闲缓冲区
+    struct buf *global_candidate = 0;
+    uint64 global_min_ts = UINT64_MAX;
+    
+
+    for (uint i = 0; i < NBUCKET; i++)
+    {
+        if (i == target_bucket)
+            continue;
+
+        acquire(&bcache[i].lock);
+        for (b = bcache[i].head; b; b = b->next)
+        {
+            if (b->refcnt == 0 && b->timestamp < global_min_ts)
+            {
+                global_candidate = b;
+                global_min_ts = b->timestamp;
+                
+            }
+        }
+        release(&bcache[i].lock);
+    }
+
+    if (!global_candidate)
+        panic("bget: no free buffer");
+
+    // 移动缓冲区到目标桶
+    move_buf(global_candidate, target_bucket);
+
+    acquire(&bcache[target_bucket].lock);
+    global_candidate->dev = dev;
+    global_candidate->blockno = blockno;
+    global_candidate->valid = 0;
+    global_candidate->refcnt = 1;
+    update_timestamp(global_candidate);
+    release(&bcache[target_bucket].lock);
+
+    acquiresleep(&global_candidate->lock);
+    return global_candidate;
 }
 
 // Return a locked buf with the contents of the indicated block.
@@ -182,7 +256,7 @@ void brelse(struct buf *b)
     b->refcnt--;
     release(&bcache[bucket_id].lock);
 
-    releasesleep(&b->lock); // 释放睡眠锁
+    releasesleep(&b->lock); // 释放睡眠锁--> 唤醒等待者
 
     // acquire(&bcache.lock); // 获取bcache全局锁
     // b->refcnt--;           // 减少引用计数

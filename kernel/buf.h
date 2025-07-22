@@ -8,9 +8,11 @@ struct buf
     uint blockno;          // 磁盘块号
     struct sleeplock lock; // 睡眠锁，用于进程同步
     uint refcnt;           // 引用计数，记录使用该缓冲区的进程数
-    // 废弃掉原链表节点
-    // struct buf *prev;      // LRU cache list // LRU缓存链表的前驱指针
-    // struct buf *next;      // LRU缓存链表的后继指针
+    
+    struct buf *prev;      // LRU cache list // LRU缓存链表的前驱指针
+    struct buf *next;      // LRU缓存链表的后继指针
     uchar data[BSIZE]; // 实际存储磁盘块数据的内存空间（BSIZE通常为512或1024字节）
-    uint timestamp;    // 新增时间戳字段
+    uint64 timestamp;    // 新增时间戳字段
+    uint home_bucket;  // 记录缓冲区当前所属桶
+
 };
