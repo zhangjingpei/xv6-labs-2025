@@ -479,23 +479,24 @@ void scheduler(void)
             }
             if (p->state == RUNNABLE)
             {
-                //schedulerinfo("scheduler: proc_%d proc_name = %s have been locker\n",p->pid,p->name);
+                printf("scheduler: proc_%d proc_name = %s have been locker\n", p->pid, p->name);
                 // Switch to chosen process.  It is the process's job
                 // to release its lock and then reacquire it
                 // before jumping back to us.
                 p->state = RUNNING;
                 c->proc = p;
-                //schedulerinfo("scheduler: proc_%d will call swtch, and &p->context->ra = %p\n",p->pid, p->context.ra);
+                printf("scheduler: proc_%d will call swtch, and &p->context->ra = %p\n", p->pid, p->context.ra);
                 swtch(&c->context, &p->context); // 由调度器线程切换到了目标内核线程
 
                 // Process is done running for now.
                 // It should have changed its p->state before coming back.
-                //schedulerinfo("scheduler: proc_%d give up cpu, now scheduler have it\n", p->pid);
+                printf("scheduler: proc_%d give up cpu, now scheduler have it\n", p->pid);
                 c->proc = 0;
             }
-            
-            release(&p->lock);
 
+            release(&p->lock);
+            if (p->pid == 3)
+                printf("scheduler: proc_%d release lock\n", p->pid);
         }
         if (nproc <= 2)
         { // only init and sh exist
@@ -528,16 +529,14 @@ void sched(void)
 
     intena = mycpu()->intena;
 
-    //info("sched: proc_%d will call swtch()\n", p->pid);
-    //info("sched: &mycpu()->context->ra:%p\n",mycpu()->context.ra);
+    printf("sched: proc_%d will call swtch()\n", p->pid);
+    printf("sched: &mycpu()->context->ra:%p\n", mycpu()->context.ra);
     swtch(&p->context, &mycpu()->context); // 由当前进程的内核线程切换到了cpu调度器
-    //info("sched: proc_%d have been returned from swtch()\n", p->pid);
-
+    printf("sched: proc_%d have been returned from swtch()\n", p->pid);
 
     // 当再次被调度时，会从这里返回
     mycpu()->intena = intena;
-    //info("sched: proc_%d have been execute  intena\n", p->pid);
-    
+    printf("sched: proc_%d have been execute  intena\n", p->pid);
 }
 
 // Give up the CPU for one scheduling round.
@@ -545,9 +544,9 @@ void yield(void)
 {
     struct proc *p = myproc();
     acquire(&p->lock);
-    //info("yield: proc_%d spinlock have been acquired\n", p->pid);
+    printf("yield: proc_%d spinlock have been acquired\n", p->pid);
     p->state = RUNNABLE;
-    //info("yield: set proc_%d state to RUNNABLE and will call sched()\n", p->pid);
+    printf("yield: set proc_%d state to RUNNABLE and will call sched()\n", p->pid);
     sched();
 
     /*
@@ -556,7 +555,7 @@ void yield(void)
     因此，在`yield`函数中，`release(&p->lock)`是在`sched`返回后才执行的。
     */
     release(&p->lock); //// 注意：这里在yield函数中，但是sched不会返回到这里，所以release在sched之后不会立即执行！
-    //info("yield: proc_%d spinlock have been released\n", p->pid);
+    printf("yield: proc_%d spinlock have been released\n", p->pid);
 }
 
 // A fork child's very first scheduling by scheduler()
@@ -566,7 +565,7 @@ void forkret(void)
     static int first = 1;
 
     // Still holding p->lock from scheduler.
-    //info("forkret: proc_%d will release lock\n", myproc()->pid);
+    printf("forkret: proc_%d will release lock\n", myproc()->pid);
     release(&myproc()->lock);
 
     if (first)
