@@ -267,7 +267,7 @@ void iupdate(struct inode *ip)
     bp = bread(ip->dev, IBLOCK(ip->inum, sb));
     dip = (struct dinode *)bp->data + ip->inum % IPB;
 
-    // 将内存inode数据复制到磁盘inode
+    // 将内存inode数据复制到缓冲区inode
     dip->type = ip->type;
     dip->major = ip->major;
     dip->minor = ip->minor;
@@ -334,7 +334,7 @@ struct inode *idup(struct inode *ip)
     return ip;
 }
 
-// 锁定inode并从磁盘加载数据
+// 锁定inode并从缓冲区加载数据
 // 参数：目标inode
 void ilock(struct inode *ip)
 {
@@ -347,7 +347,7 @@ void ilock(struct inode *ip)
     // 获取睡眠锁（可能阻塞）
     acquiresleep(&ip->lock);
 
-    // 若数据未加载，从磁盘读取
+    // 若数据未加载，从缓冲区读取
     if (ip->valid == 0)
     {
         bp = bread(ip->dev, IBLOCK(ip->inum, sb));
