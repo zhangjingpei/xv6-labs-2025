@@ -233,7 +233,7 @@ struct inode *ialloc(uint dev, short type)
     struct dinode *dip; // 磁盘inode结构
 
     // 遍历所有inode（从1开始，0号保留）
-    for (inum = 1; inum < sb.ninodes; inum++)
+    for (inum = 1; inum < sb.ninodes; inum++) // sb.ninodes = 200
     {
         // 读取包含目标inode的磁盘块
         bp = bread(dev, IBLOCK(inum, sb));
@@ -247,6 +247,7 @@ struct inode *ialloc(uint dev, short type)
             dip->type = type;
             // 标记已分配（写入日志）
             log_write(bp); // mark it allocated on the disk
+            //printf("ialloc: inode and write %d for new file.\n", IBLOCK(inum, sb));
             brelse(bp);
             return iget(dev, inum);
         }
@@ -262,7 +263,7 @@ void iupdate(struct inode *ip)
     struct buf *bp;
     struct dinode *dip;
 
-    // 读取inode所在的磁盘块
+    // 读取inode所在的缓冲区block
     bp = bread(ip->dev, IBLOCK(ip->inum, sb));
     dip = (struct dinode *)bp->data + ip->inum % IPB;
 
@@ -276,6 +277,11 @@ void iupdate(struct inode *ip)
     memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
     // 写回磁盘（通过日志）
     log_write(bp);
+    // 根据inode类型打印不同信息
+    //if (ip->type == T_DIR)
+        //printf("iupdate: %d update root inode\n", IBLOCK(ip->inum, sb)); // 目录inode
+    //else
+        //printf("iupdate: %d update inode for file\n", IBLOCK(ip->inum, sb)); // 文件inode
     brelse(bp);
 }
 
@@ -290,7 +296,7 @@ static struct inode *iget(uint dev, uint inum)
 
     // 查找是否已在缓存中
     empty = 0;
-    for (ip = &icache.inode[0]; ip < &icache.inode[NINODE]; ip++)
+    for (ip = &icache.inode[0]; ip < &icache.inode[NINODE]; ip++) // NINODE=50
     {
         // 检查引用、设备和inode号是否匹配
         if (ip->ref > 0 && ip->dev == dev && ip->inum == inum)
@@ -632,6 +638,7 @@ int dirlink(struct inode *dp, char *name, uint inum)
     int off;
     struct dirent de;
     struct inode *ip;
+    
 
     // 检查名称是否已存在
     if ((ip = dirlookup(dp, name, 0)) != 0)
@@ -657,6 +664,8 @@ int dirlink(struct inode *dp, char *name, uint inum)
     if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
         panic("dirlink");
 
+    //printf("dirlink: %d record new file in directory's data block\n",
+           //dp->inum); // 新增打印
     return 0;
 }
 
