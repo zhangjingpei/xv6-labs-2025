@@ -247,7 +247,7 @@ struct inode *ialloc(uint dev, short type)
             dip->type = type;
             // 标记已分配（写入日志）
             log_write(bp); // mark it allocated on the disk
-            //printf("ialloc: inode and write %d for new file.\n", IBLOCK(inum, sb));
+            // printf("ialloc: inode and write %d for new file.\n", IBLOCK(inum, sb));
             brelse(bp);
             return iget(dev, inum);
         }
@@ -278,10 +278,10 @@ void iupdate(struct inode *ip)
     // 写回磁盘（通过日志）
     log_write(bp);
     // 根据inode类型打印不同信息
-    //if (ip->type == T_DIR)
-        //printf("iupdate: %d update root inode\n", IBLOCK(ip->inum, sb)); // 目录inode
-    //else
-        //printf("iupdate: %d update inode for file\n", IBLOCK(ip->inum, sb)); // 文件inode
+    // if (ip->type == T_DIR)
+    // printf("iupdate: %d update root inode\n", IBLOCK(ip->inum, sb)); // 目录inode
+    // else
+    // printf("iupdate: %d update inode for file\n", IBLOCK(ip->inum, sb)); // 文件inode
     brelse(bp);
 }
 
@@ -422,7 +422,7 @@ void iunlockput(struct inode *ip)
 // 返回：物理块地址
 static uint bmap(struct inode *ip, uint bn)
 {
-    uint addr, *a;
+    uint addr, *a; // addr 存储物理块号，a 用于访问缓冲区
     struct buf *bp;
 
     // 直接块处理
@@ -435,14 +435,14 @@ static uint bmap(struct inode *ip, uint bn)
     }
     bn -= NDIRECT; // 调整逻辑块号
 
-    // 间接块处理
+    // 如果bn超出了11个，也就说明需要通过一级间接块去获取
     if (bn < NINDIRECT)
     {
         // 加载间接块（必要时分配）
         if ((addr = ip->addrs[NDIRECT]) == 0)
             ip->addrs[NDIRECT] = addr = balloc(ip->dev);
 
-        // 读取间接块
+        // 从硬盘中读出这个块
         bp = bread(ip->dev, addr);
         a = (uint *)bp->data;
         // 处理目标块
@@ -450,6 +450,40 @@ static uint bmap(struct inode *ip, uint bn)
         {
             a[bn] = addr = balloc(ip->dev); // 分配新块
             log_write(bp);                  // 更新间接块
+        }
+        brelse(bp);
+        return addr;
+    }
+
+    // 需要从二级间接块中寻找
+    bn -= NINDIRECT;
+    if (bn < NDINDIRECT)
+    {
+        // inode的二级间接块还未分配
+        if ((addr = ip->addrs[NDIRECT + 1]) == 0)
+        {
+            ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+        }
+        int level1 = bn / NINDIRECT; // et. 500 / 256 = 1  二级是索引1
+        int level2 = bn % NINDIRECT; // et. 500 % 256 = 244  一级是索引244
+
+        // 读取level1二级间接块
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        if ((addr = a[level1]) == 0)
+        {
+            a[level1] = addr = balloc(ip->dev); // 此时 addr存放的是二级索引1分配的块号 比如 600
+            log_write(bp);
+        }
+        brelse(bp);
+
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        if ((addr = a[level2]) == 0)
+        {
+            a[level2] = addr =
+                balloc(ip->dev); // 此时addr存放的是一级索引244分配的块号 比如1000  1000块里面存放的就是数据了
+            log_write(bp);
         }
         brelse(bp);
         return addr;
@@ -491,6 +525,36 @@ void itrunc(struct inode *ip)
         brelse(bp);
         bfree(ip->dev, ip->addrs[NDIRECT]);
         ip->addrs[NDIRECT] = 0;
+    }
+
+    // 处理二级间接块
+    struct buf *bp1;
+    uint *a1;
+    if (ip->addrs[NDIRECT + 1])
+    {
+        bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+        a = (uint *)bp->data;
+        // 处理一级间接块
+        for (int i = 0; i < NINDIRECT; i++)
+        {
+            if (a[i])
+            {
+                bp1 = bread(ip->dev, a[i]);
+                a1 = (uint *)bp1->data;
+                for (int j = 0; j < NINDIRECT; j++)
+                {
+                    if (a1[j])
+                    {
+                        bfree(ip->dev, a1[j]);
+                    }
+                }
+                brelse(bp1);
+                bfree(ip->dev, a[i]);
+            }
+        }
+        brelse(bp);
+        bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+        ip->addrs[NDIRECT + 1] = 0;
     }
 
     ip->size = 0;
@@ -638,7 +702,6 @@ int dirlink(struct inode *dp, char *name, uint inum)
     int off;
     struct dirent de;
     struct inode *ip;
-    
 
     // 检查名称是否已存在
     if ((ip = dirlookup(dp, name, 0)) != 0)
@@ -664,8 +727,8 @@ int dirlink(struct inode *dp, char *name, uint inum)
     if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
         panic("dirlink");
 
-    //printf("dirlink: %d record new file in directory's data block\n",
-           //dp->inum); // 新增打印
+    // printf("dirlink: %d record new file in directory's data block\n",
+    // dp->inum); // 新增打印
     return 0;
 }
 
