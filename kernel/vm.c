@@ -349,9 +349,7 @@ void uvmclear(pagetable_t pagetable, uint64 va)
     *pte &= ~PTE_U;
 }
 
-// Copy from kernel to user.
-// Copy len bytes from src to virtual address dstva in a given page table.
-// Return 0 on success, -1 on error.
+// 将内核空间中src指向的数据，拷贝到目标虚拟地址dstva对应的物理页
 int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
     uint64 n, va0, pa0;
@@ -374,9 +372,7 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     return 0;
 }
 
-// Copy from user to kernel.
-// Copy len bytes to dst from virtual address srcva in a given page table.
-// Return 0 on success, -1 on error.
+// 将内核空间中srcva指向的物理页数据，拷贝到目标虚拟地址dst中
 int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
     // uint64 n, va0, pa0;
