@@ -4,9 +4,9 @@
 #include "riscv.h"
 #include "spinlock.h"
 #include "proc.h"
-
 #include "defs.h"
 #include "fcntl.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -72,57 +72,67 @@ void usertrap(void)
     }
     else if (r_scause() == 13 || r_scause() == 15)
     {
-        uint64 va = r_stval();
-        struct vma *vma = 0;
+        // 缺页异常：13=加载页故障（读未映射地址），15=存储页故障（写未映射地址）
+        uint64 va = r_stval(); // 获取故障地址（stval寄存器存储故障虚拟地址）
+        struct vma *vma = 0;   // 用于查找对应的vma结构
 
+        // 检查故障地址是否合法：必须在用户空间范围内（小于进程大小且高于栈顶）
         if (va >= p->sz || va < p->trapframe->sp)
         {
-            goto killing;
+            goto killing; // 地址非法，终止进程
         }
 
+        // 在进程vmas数组中查找包含va的vma（遍历所有vma）
         for (int i = 0; i < NVMA; i++)
         {
+            // 检查va是否在当前vma的映射范围内：[vma.addr, vma.addr + vma.len)
             if (va >= p->vmas[i].addr && va < p->vmas[i].addr + p->vmas[i].len)
             {
-                vma = &p->vmas[i];
+                vma = &p->vmas[i]; // 找到匹配的vma
                 break;
             }
         }
 
-        if (!vma)
+        if (!vma) // 未找到对应的vma（地址未映射），终止进程
             goto killing;
 
-        va = PGROUNDDOWN(va);
+        va = PGROUNDDOWN(va); // 将故障地址向下对齐到页边界（获取页起始地址）
 
+        // 分配物理页（用于存储从文件读取的数据）
         char *mem = kalloc();
-        if (mem == 0)
+        if (mem == 0) // 内存分配失败，终止进程
             goto killing;
-        memset(mem, 0, PGSIZE);
+        memset(mem, 0, PGSIZE); // 初始化物理页为0
 
-        ilock(vma->file->ip);
-        readi(vma->file->ip, 0, (uint64)mem, va - vma->addr + vma->offset, PGSIZE);
-        iunlock(vma->file->ip);
+        // 从文件读取数据到物理页：读取vma对应的文件内容
+        ilock(vma->file->ip); // 锁定文件inode（确保文件数据不被并发修改）
+        // 读取范围：从文件偏移(vma->offset + va - vma->addr)开始，读取PGSIZE字节
+        readi(vma->file->ip, 0, (uint64)mem, vma->offset + (va - vma->addr), PGSIZE);
+        iunlock(vma->file->ip); // 解锁文件inode
 
-        int flags = PTE_U;
+        // 根据vma保护权限设置页表项标志（PTE_U表示用户可访问）
+        int flags = PTE_U; // 基本标志：用户可访问
         if (vma->prot & PROT_READ)
-            flags |= PTE_R;
+            flags |= PTE_R; // 读权限
         if (vma->prot & PROT_WRITE)
-            flags |= PTE_W;
+            flags |= PTE_W; // 写权限
         if (vma->prot & PROT_EXEC)
-            flags |= PTE_X;
+            flags |= PTE_X; // 执行权限
 
+        // 建立页表映射：将虚拟地址va映射到物理地址mem，权限为flags
         if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, flags) != 0)
         {
-            goto freeing;
+            // 映射失败，释放物理页
+            kfree(mem);
+            goto killing;
         }
-        goto rest;
+        goto rest; // 映射成功，继续执行
 
-    freeing:
+    freeing: // 释放物理页（错误处理标签）
         kfree(mem);
-    killing:
-        p->killed = 1;
-    rest:
-        ;
+    killing:           // 终止进程（错误处理标签）
+        p->killed = 1; // 标记进程为"已终止"
+    rest:;             // 继续执行标签
     }
     else
     {

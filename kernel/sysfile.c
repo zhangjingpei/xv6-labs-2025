@@ -500,50 +500,121 @@ uint64 sys_pipe(void)
     return 0;
 }
 
+// mmap系统调用：将文件或匿名内存映射到进程地址空间
+// 参数：
+//   addr: 用户期望的映射起始地址（0表示由内核分配）
+//   len: 映射区域长度（字节）
+//   prot: 内存保护权限（PROT_READ/PROT_WRITE/PROT_EXEC等组合）
+//   flags: 映射标志（如MAP_SHARED/MAP_PRIVATE）
+//   fd: 待映射的文件描述符（匿名映射时为-1）
+//   offset: 文件偏移量（必须页对齐）
+// 返回：成功返回映射起始地址，失败返回-1
 uint64 sys_mmap(void)
 {
-    uint64 addr;
-    int len, prot, flags, fd, offset;
-    struct file *file;
-    struct vma *vma = 0;
+    uint64 addr;                      // 用户指定的映射起始地址（或0）
+    int len, prot, flags, fd, offset; // 映射长度、保护权限、标志、文件描述符、文件偏移
+    struct file *file;                // 指向待映射文件的指针
+    struct vma *vma = 0;              // 用于存储找到的空闲虚拟内存区域结构
 
+    // 从用户空间获取系统调用参数：addr、len、prot、flags、fd、offset
     if (argaddr(0, &addr) < 0 || argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 ||
         argfd(4, &fd, &file) < 0 || argint(5, &offset) < 0)
         return -1;
 
-    // 保护权限冲突
+    // 保护权限冲突检查：若为共享映射(MAP_SHARED)且文件不可写，但prot要求写权限，则错误
     if (!file->writable && (prot & PROT_WRITE) && flags == MAP_SHARED)
         return -1;
 
     struct proc *p = myproc();
-    len = PGROUNDUP(len);
+    len = PGROUNDUP(len); // 将长度向上页对齐（确保映射区域是整页）
+
+    // 检查地址空间是否足够：当前进程大小+映射长度不能超过最大用户虚拟地址(MAXVA)
     if (p->sz + len > MAXVA)
         return -1;
+
+    // 检查文件偏移是否合法：偏移量不能为负，且必须页对齐
     if (offset < 0 || offset % PGSIZE)
         return -1;
+
+    // 在进程的vmas数组中查找空闲的虚拟内存区域结构（NVMA为vma最大数量）
     for (int i = 0; i < NVMA; i++)
     {
-        if (p->vmas[i].addr)
+        if (p->vmas[i].addr) // addr为0表示该vma项未使用
             continue;
-        vma = &p->vmas[i];
+        vma = &p->vmas[i]; // 找到空闲vma，记录其指针
         break;
     }
-    if (!vma) // 在vmas中没有找到可以映射的空闲区域 16个全被沾满
+
+    if (!vma) // 若vmas数组已满（无空闲vma项），返回错误
         return -1;
 
+    // 确定映射起始地址：若用户指定addr为0，则由内核分配（从进程当前大小p->sz开始）
     if (addr == 0)
         vma->addr = p->sz;
-
     else
-        vma->addr = addr;
+        vma->addr = addr; // 否则使用用户指定的addr（需确保未被占用，此处简化处理）
 
-    vma->len = len;
-    vma->prot = prot;
-    vma->flags = flags;
-    vma->fd = fd;
-    vma->offset = offset;
-    vma->file = file;
-    filedup(file);
-    p->sz += len;
-    return vma->addr;
+    // 初始化vma结构的其他字段
+    vma->len = len;       // 映射区域长度（页对齐后）
+    vma->prot = prot;     // 保护权限（如读/写/执行）
+    vma->flags = flags;   // 映射标志（如共享/私有）
+    vma->fd = fd;         // 文件描述符（供后续解除映射时使用）
+    vma->offset = offset; // 文件偏移量（从文件该位置开始映射）
+    vma->file = file;     // 指向映射文件的指针（用于后续缺页时读取文件内容）
+    filedup(file);        // 增加文件引用计数（确保文件在映射期间不被关闭）
+    p->sz += len;         // 更新进程地址空间大小（扩展到映射区域末尾）
+    return vma->addr;     // 返回映射起始地址
+}
+
+// munmap系统调用：解除进程地址空间中的内存映射
+// 参数：
+//   addr: 待解除映射的起始地址（必须页对齐）
+//   len: 解除映射的长度（字节）
+// 返回：成功返回0，失败返回-1
+uint64 sys_munmap(void)
+{
+    uint64 addr;               // 解除映射的起始地址
+    int len;                   // 解除映射的长度
+    struct vma *vma = 0;       // 指向待解除映射对应的vma结构
+    struct proc *p = myproc(); // 获取当前进程结构体
+
+    // 从用户空间获取系统调用参数：addr和len
+    if (argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+        return -1;
+
+    // 地址和长度页对齐：确保操作以页为单位（内存管理的基本单位）
+    addr = PGROUNDDOWN(addr); // 起始地址向下对齐到页边界
+    len = PGROUNDUP(len);     // 长度向上对齐到页边界
+
+    // 在进程vmas数组中查找与addr匹配的vma（即addr属于该vma的映射范围）
+    for (int i = 0; i < NVMA; i++)
+    {
+        // 检查vma是否有效（addr非0），且addr在[vma.addr, vma.addr + vma.len)范围内
+        if (p->vmas[i].addr && addr >= p->vmas[i].addr && addr + len <= p->vmas[i].addr + p->vmas[i].len)
+        {
+            vma = &p->vmas[i]; // 找到匹配的vma
+            break;
+        }
+    }
+
+    if (!vma) // 未找到对应的vma，返回错误
+        return -1;
+
+    // 检查解除映射的起始地址是否与vma的起始地址一致（简化处理：仅支持整段解除）
+    if (addr != vma->addr)
+        return -1;
+
+    // 调整vma结构：移除已解除映射的部分（剩余区域的起始地址后移，长度减少）
+    vma->addr += len; // 新的起始地址 = 原起始地址 + 解除的长度
+    vma->len -= len;  // 新的长度 = 原长度 - 解除的长度
+
+    // 若为共享映射(MAP_SHARED)，需将内存中的修改写回文件
+    if (vma->flags & MAP_SHARED)
+    {
+        filewrite(vma->file, addr, len); // 将addr开始的len字节写回文件
+    }
+
+    // 解除页表映射：释放物理页（do_free=1表示释放物理内存）
+    uvmunmap(p->pagetable, addr, len / PGSIZE, 1); // 页数 = len / 页大小(PGSIZE)
+    return 0;                                      // 成功解除映射
 }
