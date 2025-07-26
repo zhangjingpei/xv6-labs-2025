@@ -152,6 +152,8 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
     a = PGROUNDDOWN(va);
     last = PGROUNDDOWN(va + size - 1);
+    // printf("a:%d\n", a);
+    // printf("last:%d\n", last);
     for (;;)
     {
         if ((pte = walk(pagetable, a, 1)) == 0)
@@ -363,7 +365,7 @@ void uvmclear(pagetable_t pagetable, uint64 va)
 
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
-// Return 0 on success, -1 on error.
+// Return 0 on success, -1 on error.  dstva--->实际物理地址<-----内核缓冲区copy到
 int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
     uint64 n, va0, pa0;
@@ -489,6 +491,7 @@ int cow_handler(pagetable_t pagetable, uint64 va)
         // 解除原先的映射，注意最后一个参数为0，不要释放物理页
         uvmunmap(pagetable, PGROUNDDOWN(va), 1, 0);
         // 映射到新的物理页
+        // printf("cow_handler:mappages\n");
         if (mappages(pagetable, va, 1, newpa, flags) == -1)
         {
             panic("uvmcowcopy: mappages");
