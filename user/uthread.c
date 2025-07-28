@@ -103,7 +103,7 @@ void thread_schedule(void)
          * 参数2：加载新线程上下文的地址
          */
         // 调用 thread_switch 进行上下文切换
-        printf("thread_schedule:next_thread context = :%p\n", next_thread->context.ra);
+        //printf("thread_schedule:next_thread context = :%p\n", next_thread->context.ra);
         thread_switch((uint64)&t->context, (uint64)&next_thread->context);
         
     }
