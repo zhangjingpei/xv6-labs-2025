@@ -604,17 +604,30 @@ uint64 sys_munmap(void)
     if (addr != vma->addr)
         return -1;
 
-    // 调整vma结构：移除已解除映射的部分（剩余区域的起始地址后移，长度减少）
-    vma->addr += len; // 新的起始地址 = 原起始地址 + 解除的长度
-    vma->len -= len;  // 新的长度 = 原长度 - 解除的长度
-
-    // 若为共享映射(MAP_SHARED)，需将内存中的修改写回文件
+    // 如果是共享映射，需要在接触映射的时候写回文件！
     if (vma->flags & MAP_SHARED)
+        filewrite(vma->file, addr, len);
+
+    // 解除页表映射
+    uvmunmap(p->pagetable, addr, len / PGSIZE, 1);
+
+    // 更新 VMA 信息
+    if (len == vma->len)
     {
-        filewrite(vma->file, addr, len); // 将addr开始的len字节写回文件
+        // 完全解除映射，则释放 VMA
+        fileclose(vma->file);
+        memset(vma, 0, sizeof(*vma));
+    }
+    else
+    {
+        // 部分解除映射，更新地址和长度
+        vma->addr += len;
+        vma->len -= len;
     }
 
-    // 解除页表映射：释放物理页（do_free=1表示释放物理内存）
-    uvmunmap(p->pagetable, addr, len / PGSIZE, 1); // 页数 = len / 页大小(PGSIZE)
-    return 0;                                      // 成功解除映射
+    // 解除映射的是进程地址空间的末尾，调整当前进程大小
+    if (addr + len == p->sz)
+        p->sz -= len;
+
+    return 0;
 }

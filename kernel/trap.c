@@ -128,8 +128,7 @@ void usertrap(void)
         }
         goto rest; // 映射成功，继续执行
 
-    freeing: // 释放物理页（错误处理标签）
-        kfree(mem);
+    
     killing:           // 终止进程（错误处理标签）
         p->killed = 1; // 标记进程为"已终止"
     rest:;             // 继续执行标签
